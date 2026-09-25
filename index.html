@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PL vs BARANG Checker</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+body{font-family:Arial,sans-serif;background:#f5f7fb;margin:0;color:#222}
+.wrap{max-width:1050px;margin:35px auto;padding:0 18px}
+.card{background:#fff;padding:24px;border-radius:14px;margin-bottom:18px;box-shadow:0 3px 15px #00000012}
+h1{margin-top:0}.sub{color:#667085}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+label{display:block;font-weight:bold;margin:9px 0}
+input,select{width:100%;padding:10px;border:1px solid #ccd2da;border-radius:8px}
+button{border:0;border-radius:8px;padding:11px 16px;font-weight:bold;cursor:pointer}
+.primary{background:#1f6feb;color:#fff}.secondary{background:#e9eef6}
+.actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.error{background:#fef3f2;color:#b42318;border:1px solid #fecdca;padding:13px;border-radius:8px;white-space:pre-wrap}
+.hidden{display:none}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat{background:#f8fafc;border:1px solid #e4e7ec;padding:14px;border-radius:9px}.stat b{display:block;font-size:24px;margin-top:5px}
+.table{overflow:auto;max-height:520px;border:1px solid #e4e7ec}
+table{border-collapse:collapse;width:100%;min-width:700px}th,td{padding:9px;border-bottom:1px solid #e4e7ec;text-align:left}th{background:#f8fafc;position:sticky;top:0}
+@media(max-width:700px){.grid,.stats{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h1>📊 Excel PL vs BARANG Checker</h1>
+<p class="sub">Membandingkan baris PL dengan baris BARANG pada posisi yang sama. File diproses langsung di browser.</p>
+<div class="grid">
+<div><label>File PL</label><input id="pl" type="file" accept=".xlsx,.xls"><div id="pls" class="hidden"><label>Sheet PL</label><select id="plslt"></select></div></div>
+<div><label>File BARANG</label><input id="br" type="file" accept=".xlsx,.xls"><div id="brs" class="hidden"><label>Sheet BARANG</label><select id="brslt"></select></div></div>
+</div>
+<div class="actions"><button class="primary" id="go">🔍 Bandingkan</button></div>
+<div id="msg"></div>
+</div>
+
+<div id="result" class="card hidden">
+<div class="stats">
+<div class="stat">Baris PL<b id="pc">0</b></div>
+<div class="stat">Baris BARANG<b id="bc">0</b></div>
+<div class="stat">Perbedaan<b id="dc">0</b></div>
+</div>
+<div id="content" style="margin-top:18px"></div>
+<button class="primary hidden" id="download">⬇️ Download Hasil Perbandingan</button>
+</div>
+</div>
+
+<script>
+let P=null,B=null,diffs=[];
+const $=id=>document.getElementById(id);
+const txt=v=>v==null?"":String(v).replace(/\\r|\\n/g," ").replace(/\\s+/g," ").trim().toUpperCase();
+function num(v){
+ if(v==null||String(v).trim()==="")return null;
+ if(typeof v==="number"&&Number.isFinite(v))return v;
+ let s=String(v).trim().replace(/\\s/g,"");
+ if(/^[-]?\\d{1,3}(\\.\\d{3})+(,\\d+)?$/.test(s))s=s.replace(/\\./g,"").replace(",",".");
+ else if(/^[-]?\\d+(,\\d+)$/.test(s))s=s.replace(",",".");
+ let n=Number(s); return Number.isFinite(n)?n:null;
+}
+function eq(a,b){let x=num(a),y=num(b);return x!==null&&y!==null?Math.abs(x-y)<=1e-6:txt(a)===txt(b)}
+function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+function find(headers,cands){let m={};headers.forEach(h=>m[txt(h)]=h);for(const c of cands){if(m[txt(c)]!==undefined)return m[txt(c)]}return null}
+async function read(f){return XLSX.read(await f.arrayBuffer(),{type:"array"})}
+function sheets(w,sid,wid){$(sid).innerHTML="";w.SheetNames.forEach(n=>{let o=document.createElement("option");o.value=n;o.textContent=n;$(sid).appendChild(o)});$(wid).classList.remove("hidden")}
+function rows(w,s){return XLSX.utils.sheet_to_json(w.Sheets[s],{header:1,defval:null,raw:true})}
+function headerRow(r,cands){for(let i=0;i<Math.min(r.length,30);i++)if(cands.some(c=>r[i].map(txt).includes(txt(c))))return i;return -1}
+function make(r,h){let headers=r[h]||[],data=[];for(let i=h+1;i<r.length;i++){let o={};headers.forEach((x,j)=>{if(x!=null&&String(x).trim()!=="")o[x]=r[i]?.[j]});if(Object.values(o).some(v=>v!=null&&String(v).trim()!==""))data.push(o)}return{headers,data}}
+
+$("pl").onchange=async e=>{try{P=await read(e.target.files[0]);sheets(P,"plslt","pls");$("msg").innerHTML=""}catch(x){$("msg").innerHTML='<div class="error">File PL tidak bisa dibaca.</div>'}}
+$("br").onchange=async e=>{try{B=await read(e.target.files[0]);sheets(B,"brslt","brs");$("msg").innerHTML=""}catch(x){$("msg").innerHTML='<div class="error">File BARANG tidak bisa dibaca.</div>'}}
+
+$("go").onclick=()=>{
+ $("msg").innerHTML="";$("result").classList.add("hidden");$("download").classList.add("hidden");
+ if(!P||!B){$("msg").innerHTML='<div class="error">Pilih file PL dan BARANG terlebih dahulu.</div>';return}
+ try{
+  let pr=rows(P,$("plslt").value),br=rows(B,$("brslt").value);
+  let ph=headerRow(pr,["MATERIAL CODE","ITEM NAME","QTY"]),bh=headerRow(br,["KODE BARANG","URAIAN","JUMLAH SATUAN"]);
+  if(ph<0)throw Error("Header PL tidak ditemukan.");
+  if(bh<0)throw Error("Header BARANG tidak ditemukan.");
+  let p=make(pr,ph),b=make(br,bh);
+  let pm=find(p.headers,["MATERIAL CODE","MATERIAL\\nCODE","MATERIALCODE"]),pi=find(p.headers,["ITEM NAME","ITEM\\nNAME","ITEMNAME"]),pq=find(p.headers,["QTY"]),pn=find(p.headers,["N/W","NW","NETTO","N/W KG"]),pg=find(p.headers,["G/W","GW","BRUTO","G/W KG"]);
+  let bk=find(b.headers,["KODE BARANG","KODEBARANG"]),bi=find(b.headers,["URAIAN"]),bq=find(b.headers,["JUMLAH SATUAN","JUMLAHSATUAN","QTY"]),bn=find(b.headers,["NETTO"]),bg=find(b.headers,["BRUTO"]);
+  let req={"PL - MATERIAL CODE":pm,"PL - ITEM NAME":pi,"PL - QTY":pq,"PL - NETTO/NW":pn,"PL - BRUTO/GW":pg,"BARANG - KODE BARANG":bk,"BARANG - URAIAN":bi,"BARANG - JUMLAH SATUAN":bq,"BARANG - NETTO":bn,"BARANG - BRUTO":bg};
+  let miss=Object.entries(req).filter(x=>!x[1]).map(x=>x[0]);if(miss.length)throw Error("Kolom tidak ditemukan:\\n"+miss.join("\\n"));
+  diffs=[];let n=Math.max(p.data.length,b.data.length);
+  for(let i=0;i<n;i++){let x=p.data[i]||{},y=b.data[i]||[];[
+   ["MATERIAL CODE / KODE BARANG",x[pm],y[bk]],["ITEM NAME / URAIAN",x[pi],y[bi]],["QTY / JUMLAH SATUAN",x[pq],y[bq]],["NETTO / N/W",x[pn],y[bn]],["BRUTO / G/W",x[pg],y[bg]]
+  ].forEach(c=>{if(!eq(c[1],c[2]))diffs.push({"BARIS DATA":i+1,"FIELD":c[0],"PL":c[1]??"","BARANG":c[2]??""})})}
+  $("pc").textContent=p.data.length;$("bc").textContent=b.data.length;$("dc").textContent=diffs.length;$("result").classList.remove("hidden");
+  if(!diffs.length){$("content").innerHTML="";return}
+  let h="<h2>Perbedaan Ditemukan</h2><div class='table'><table><thead><tr><th>Baris Data</th><th>Field</th><th>PL</th><th>BARANG</th></tr></thead><tbody>";
+  diffs.forEach(d=>h+=`<tr><td>${esc(d["BARIS DATA"])}</td><td>${esc(d.FIELD)}</td><td>${esc(d.PL)}</td><td>${esc(d.BARANG)}</td></tr>`);
+  $("content").innerHTML=h+"</tbody></table></div>";$("download").classList.remove("hidden");
+ }catch(x){$("msg").innerHTML='<div class="error">'+esc(x.message)+'</div>'}
+};
+$("download").onclick=()=>{let ws=XLSX.utils.json_to_sheet(diffs),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"PERBEDAAN");XLSX.writeFile(wb,"hasil_perbandingan_PL_vs_BARANG.xlsx")}
+</script>
+</body>
+</html>
