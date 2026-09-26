@@ -68,285 +68,1025 @@ table{border-collapse:collapse;width:100%;min-width:700px}th,td{padding:9px;bord
 
 <script>
 let P=null,B=null,diffs=[];
+
 const $=id=>document.getElementById(id);
+
+
+/* =========================================================
+   NORMALISASI TEKS
+   - Mengabaikan spasi
+   - Mengabaikan Enter / baris baru
+   - Mengabaikan Tab
+   - Huruf besar/kecil dianggap sama
+   ========================================================= */
 
 const txt=v=>v==null?"":String(v)
   .replace(/\s+/g,"")
   .toUpperCase();
 
+
+/* =========================================================
+   NORMALISASI ANGKA
+   ========================================================= */
+
 function num(v){
-  if(v==null||String(v).trim()==="") return null;
-  if(typeof v==="number"&&Number.isFinite(v)) return v;
+  if(v==null || String(v).trim()==="") return null;
+
+  if(typeof v==="number" && Number.isFinite(v)){
+    return v;
+  }
+
   let s=String(v).trim().replace(/\s/g,"");
-  if(/^[-]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s=s.replace(/\./g,"").replace(",",".");
-  else if(/^[-]?\d+(,\d+)$/.test(s)) s=s.replace(",",".");
+
+  /*
+    Contoh:
+    1.234,56 -> 1234.56
+    1234,56  -> 1234.56
+  */
+
+  if(/^[-]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)){
+    s=s.replace(/\./g,"").replace(",",".");
+  }
+  else if(/^[-]?\d+(,\d+)$/.test(s)){
+    s=s.replace(",",".");
+  }
+
   let n=Number(s);
-  return Number.isFinite(n)?n:null;
+
+  return Number.isFinite(n) ? n : null;
 }
+
+
+/* =========================================================
+   MEMBANDINGKAN NILAI
+   Angka diberi toleransi kecil.
+   Teks dibandingkan setelah spasi/Enter diabaikan.
+   ========================================================= */
 
 function eq(a,b){
-  let x=num(a),y=num(b);
-  return x!==null&&y!==null ? Math.abs(x-y)<=1e-6 : txt(a)===txt(b);
+
+  let x=num(a);
+  let y=num(b);
+
+  if(x!==null && y!==null){
+    return Math.abs(x-y)<=1e-6;
+  }
+
+  return txt(a)===txt(b);
 }
+
+
+/* =========================================================
+   ESCAPE HTML
+   Supaya isi Excel aman ditampilkan di tabel.
+   ========================================================= */
 
 function esc(v){
-  return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return String(v??"")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
 }
 
-async function read(f){ return XLSX.read(await f.arrayBuffer(),{type:"array"}); }
+
+/* =========================================================
+   BACA FILE EXCEL
+   ========================================================= */
+
+async function read(f){
+  return XLSX.read(
+    await f.arrayBuffer(),
+    {type:"array"}
+  );
+}
+
+
+/* =========================================================
+   TAMPILKAN DAFTAR SHEET
+   ========================================================= */
 
 function sheets(w,sid,wid){
+
   $(sid).innerHTML="";
+
   w.SheetNames.forEach(n=>{
+
     let o=document.createElement("option");
-    o.value=n;o.textContent=n;$(sid).appendChild(o);
+
+    o.value=n;
+    o.textContent=n;
+
+    $(sid).appendChild(o);
+
   });
+
   $(wid).classList.remove("hidden");
 }
 
+
+/* =========================================================
+   UBAH SHEET MENJADI ARRAY BARIS
+   ========================================================= */
+
 function rows(w,s){
-  return XLSX.utils.sheet_to_json(w.Sheets[s],{header:1,defval:null,raw:true});
+
+  return XLSX.utils.sheet_to_json(
+    w.Sheets[s],
+    {
+      header:1,
+      defval:null,
+      raw:true
+    }
+  );
 }
 
-/* Cari baris header berdasarkan beberapa nama yang harus muncul pada baris yang sama. */
-function headerRow(r, groups){
+
+/* =========================================================
+   CARI HEADER BARIS
+   ========================================================= */
+
+function headerRow(r,groups){
+
   for(let i=0;i<Math.min(r.length,40);i++){
+
     let row=(r[i]||[]).map(txt);
-    if(groups.every(group=>group.some(c=>row.includes(txt(c))))) return i;
+
+    if(
+      groups.every(group=>
+        group.some(c=>
+          row.includes(txt(c))
+        )
+      )
+    ){
+      return i;
+    }
+
   }
+
   return -1;
 }
 
-/* Cari kolom berdasarkan label di satu atau beberapa baris header.
-   Ini penting karena PL memiliki header bertingkat:
-   baris 5 = WEIGHT, baris 6 = GW/NW.
-*/
-function findCol(r, headerRows, aliases){
-  let maxCols=Math.max(...headerRows.map(h=>(r[h]||[]).length),0);
+
+/* =========================================================
+   CARI KOLOM BERDASARKAN NAMA HEADER
+   Bisa membaca header bertingkat.
+   ========================================================= */
+
+function findCol(r,headerRows,aliases){
+
+  let maxCols=Math.max(
+    ...headerRows.map(
+      h=>(r[h]||[]).length
+    ),
+    0
+  );
+
   for(let c=0;c<maxCols;c++){
+
     let labels=[];
+
     headerRows.forEach(h=>{
+
       let v=r[h]?.[c];
-      if(v!=null && txt(v)!=="") labels.push(txt(v));
+
+      if(
+        v!=null &&
+        txt(v)!==""
+      ){
+        labels.push(txt(v));
+      }
+
     });
-    if(labels.some(label=>aliases.some(a=>label===txt(a)))) return c;
+
+    if(
+      labels.some(label=>
+        aliases.some(a=>
+          label===txt(a)
+        )
+      )
+    ){
+      return c;
+    }
+
   }
+
   return -1;
 }
 
-/* Gabungkan label utama + sublabel hanya untuk informasi/debug; nilai data tetap memakai indeks kolom. */
+
+/* =========================================================
+   AMBIL DATA
+   ========================================================= */
+
 function extractData(r,startRow,keyCol){
+
   let data=[];
   let started=false;
+
   for(let i=startRow;i<r.length;i++){
+
     let row=r[i]||[];
+
     let key=row[keyCol];
     let keyText=txt(key);
 
-    if(keyText==="TOTAL") break;
+    /* Berhenti jika menemukan TOTAL */
+    if(keyText==="TOTAL"){
+      break;
+    }
 
-    let hasAny=row.some(v=>v!=null && String(v).trim()!=="");
+    let hasAny=row.some(
+      v=>v!=null &&
+         String(v).trim()!==""
+    );
 
+    /*
+      Baris kosong sebelum data dimulai:
+      abaikan.
+    */
     if(!hasAny){
-      if(started) break;
+
+      if(started){
+        break;
+      }
+
       continue;
     }
 
-    /* Setelah data dimulai, baris tanpa kode dianggap akhir data. */
-    if(started && keyText==="") break;
+    /*
+      Setelah data dimulai,
+      baris tanpa kode dianggap akhir data.
+    */
+    if(started && keyText===""){
+      break;
+    }
 
-    /* Abaikan baris footer seperti PAIRS / nama perusahaan. */
-    if(!started && keyText==="") continue;
+    /*
+      Abaikan baris kosong/footer sebelum data.
+    */
+    if(!started && keyText===""){
+      continue;
+    }
 
     started=true;
+
     data.push(row);
   }
+
   return data;
 }
 
+
+/* =========================================================
+   FILE PL DIPILIH
+   ========================================================= */
+
 $("pl").onchange=async e=>{
+
   try{
+
     P=await read(e.target.files[0]);
-    sheets(P,"plslt","pls");
+
+    sheets(
+      P,
+      "plslt",
+      "pls"
+    );
+
     $("msg").innerHTML="";
+
   }catch(x){
-    $("msg").innerHTML='<div class="error">File PL tidak bisa dibaca.</div>';
+
+    $("msg").innerHTML=
+      '<div class="error">' +
+      'File PL tidak bisa dibaca.' +
+      '</div>';
+
   }
+
 };
+
+
+/* =========================================================
+   FILE BARANG DIPILIH
+   ========================================================= */
 
 $("br").onchange=async e=>{
+
   try{
+
     B=await read(e.target.files[0]);
-    sheets(B,"brslt","brs");
+
+    sheets(
+      B,
+      "brslt",
+      "brs"
+    );
+
     $("msg").innerHTML="";
+
   }catch(x){
-    $("msg").innerHTML='<div class="error">File BARANG tidak bisa dibaca.</div>';
+
+    $("msg").innerHTML=
+      '<div class="error">' +
+      'File BARANG tidak bisa dibaca.' +
+      '</div>';
+
   }
+
 };
 
+
+/* =========================================================
+   PROSES PERBANDINGAN
+   ========================================================= */
+
 $("go").onclick=()=>{
+
   $("msg").innerHTML="";
+
   $("result").classList.add("hidden");
+
   $("download").classList.add("hidden");
 
-  if(!P||!B){
-    $("msg").innerHTML='<div class="error">Pilih file PL dan BARANG terlebih dahulu.</div>';
+  $("content").innerHTML="";
+
+
+  /* Cek file */
+  if(!P || !B){
+
+    $("msg").innerHTML=
+      '<div class="error">' +
+      'Pilih file PL dan BARANG terlebih dahulu.' +
+      '</div>';
+
     return;
   }
 
+
   try{
-    let pr=rows(P,$("plslt").value);
-    let br=rows(B,$("brslt").value);
 
-    /* PL:
-       Format lama bisa memakai MATERIAL CODE.
-       Format contoh baru memakai STYLE.
-       ITEM NAME dan TOTAL QTY (PAIRS) ada di baris utama.
-    */
-    let ph=headerRow(pr,[
-      ["MATERIAL CODE","SKU","STYLE"],
-      ["ITEM NAME","ITEM\nNAME","ITEMNAME"],
-      ["QTY","TOTAL QTY","TOTAL QTY (PAIRS)","QUANTITY"]
-    ]);
+    /* ===============================================
+       BACA SHEET
+       =============================================== */
 
-    /* BARANG menggunakan satu baris header. */
-    let bh=headerRow(br,[
-      ["KODE BARANG","KODEBARANG"],
-      ["URAIAN"],
-      ["JUMLAH SATUAN","JUMLAHSATUAN","QTY"]
-    ]);
+    let pr=rows(
+      P,
+      $("plslt").value
+    );
 
-    if(ph<0) throw Error("Header PL tidak ditemukan.");
-    if(bh<0) throw Error("Header BARANG tidak ditemukan.");
+    let br=rows(
+      B,
+      $("brslt").value
+    );
 
-    /* Jika baris berikutnya memiliki GW/NW, berarti PL memakai header bertingkat. */
-    let next=pr[ph+1]||[];
-    let hasSubWeight=next.some(v=>["GW","NW","GROSS WEIGHT","NET WEIGHT"].includes(txt(v)));
-    let plHeaderRows=hasSubWeight?[ph,ph+1]:[ph];
 
-    let pm=findCol(pr,plHeaderRows,["MATERIAL CODE","MATERIAL\nCODE","MATERIALCODE","SKU","STYLE"]);
-    let pi=findCol(pr,plHeaderRows,["ITEM NAME","ITEM\nNAME","ITEMNAME"]);
-    let pq=findCol(pr,plHeaderRows,["QTY","TOTAL QTY","TOTAL QTY (PAIRS)","TOTAL QTY PAIRS","QUANTITY"]);
-    let pn=findCol(pr,plHeaderRows,["N/W","NW","NETTO","NET WEIGHT"]);
-    let pg=findCol(pr,plHeaderRows,["G/W","GW","BRUTO","GROSS WEIGHT"]);
+    /* ===============================================
+       HEADER PL
+       
+       PL bisa mempunyai:
+       MATERIAL CODE
+       SKU
+       STYLE
+       =============================================== */
 
-    let bk=findCol(br,[bh],["KODE BARANG","KODEBARANG"]);
-    let bi=findCol(br,[bh],["URAIAN"]);
-    let bq=findCol(br,[bh],["JUMLAH SATUAN","JUMLAHSATUAN","QTY"]);
-    let bn=findCol(br,[bh],["NETTO"]);
-    let bg=findCol(br,[bh],["BRUTO"]);
+    let ph=-1;
 
-    let req={
-      "PL - MATERIAL CODE / SKU / STYLE":pm,
-      "PL - ITEM NAME":pi,
-      "PL - QTY / TOTAL QTY":pq,
-      "PL - NETTO / NW":pn,
-      "PL - BRUTO / GW":pg,
-      "BARANG - KODE BARANG":bk,
-      "BARANG - URAIAN":bi,
-      "BARANG - JUMLAH SATUAN":bq,
-      "BARANG - NETTO":bn,
-      "BARANG - BRUTO":bg
-    };
+    const codeAliases=[
+      "MATERIAL CODE",
+      "MATERIAL\nCODE",
+      "MATERIALCODE",
+      "SKU",
+      "STYLE"
+    ];
 
-    let miss=Object.entries(req).filter(x=>x[1]<0).map(x=>x[0]);
-    if(miss.length) throw Error("Kolom tidak ditemukan:\n"+miss.join("\n"));
+    const itemAliases=[
+      "ITEM NAME",
+      "ITEM\nNAME",
+      "ITEMNAME"
+    ];
+
+    const qtyAliases=[
+      "QTY",
+      "TOTAL QTY",
+      "TOTAL QTY (PAIRS)",
+      "QUANTITY"
+    ];
+
 
     /*
-      PENTING:
-      PL GW dan NW boleh berada dalam urutan apa pun.
-      Yang dibandingkan berdasarkan NAMA FIELD:
-        PL NW -> BARANG NETTO
-        PL GW -> BARANG BRUTO
-      Jadi posisi kolom tidak menjadi acuan.
+      Cari baris yang memiliki:
+      - kode
+      - ITEM NAME
+      - QTY
     */
-    let pDataStart=ph+plHeaderRows.length;
-    let bDataStart=bh+1;
 
-    let pdata=extractData(pr,pDataStart,pm);
-    let bdata=extractData(br,bDataStart,bk);
+    for(
+      let i=0;
+      i<Math.min(pr.length,40);
+      i++
+    ){
 
-    diffs=[];
-    let n=Math.max(pdata.length,bdata.length);
+      let row=(pr[i]||[]).map(txt);
 
-    for(let i=0;i<n;i++){
-      let x=pdata[i]||[];
-      let y=bdata[i]||[];
+      let hasCode=
+        codeAliases.some(
+          a=>row.includes(txt(a))
+        );
 
-      [
-        ["MATERIAL CODE / SKU / STYLE ↔ KODE BARANG",x[pm],y[bk]],
-        ["ITEM NAME ↔ URAIAN",x[pi],y[bi]],
-        ["QTY / TOTAL QTY ↔ JUMLAH SATUAN",x[pq],y[bq]],
-        ["NETTO / NW ↔ NETTO",x[pn],y[bn]],
-        ["BRUTO / GW ↔ BRUTO",x[pg],y[bg]]
-      ].forEach(c=>{
-        if(!eq(c[1],c[2])){
-          diffs.push({
-            "BARIS DATA":i+1,
-            "FIELD":c[0],
-            "PL":c[1]??"",
-            "BARANG":c[2]??""
-          });
-        }
-      });
+      let hasItem=
+        itemAliases.some(
+          a=>row.includes(txt(a))
+        );
+
+      let hasQty=
+        qtyAliases.some(
+          a=>row.includes(txt(a))
+        );
+
+      if(
+        hasCode &&
+        hasItem &&
+        hasQty
+      ){
+
+        ph=i;
+        break;
+
+      }
+
     }
 
-    $("pc").textContent=pdata.length;
-    $("bc").textContent=bdata.length;
-    $("dc").textContent=diffs.length;
-    $("result").classList.remove("hidden");
 
-   if(!diffs.length){
-  $("content").innerHTML=
-    '<div class="match">✅ BOTH FILES MATCH' +
-    '<small>PL dan BARANG memiliki data yang sama.</small></div>';
-  return;
-}
+    /* ===============================================
+       HEADER BARANG
+       =============================================== */
 
-let h=
-  '<div class="mismatch">❌ DATA TIDAK SESUAI' +
-  '<small>Ditemukan ' + diffs.length + ' perbedaan antara file PL dan BARANG.</small>' +
-  '</div>' +
+    let bh=headerRow(
+      br,
+      [
+        [
+          "KODE BARANG",
+          "KODEBARANG"
+        ],
+        [
+          "URAIAN"
+        ],
+        [
+          "JUMLAH SATUAN",
+          "JUMLAHSATUAN",
+          "QTY"
+        ]
+      ]
+    );
 
-  '<h2>Perbedaan Ditemukan</h2>' +
-  '<div class="table">' +
-  '<table>' +
-  '<thead>' +
-  '<tr>' +
-  '<th>Baris Data</th>' +
-  '<th>Field</th>' +
-  '<th>PL</th>' +
-  '<th>BARANG</th>' +
-  '</tr>' +
-  '</thead>' +
-  '<tbody>';
 
-diffs.forEach(d=>{
-  h+=`<tr>
-    <td>${esc(d["BARIS DATA"])}</td>
-    <td>${esc(d.FIELD)}</td>
-    <td>${esc(d.PL)}</td>
-    <td>${esc(d.BARANG)}</td>
-  </tr>`;
-});
+    if(ph<0){
 
-$("content").innerHTML=
-  h +
-  "</tbody></table></div>";
+      throw Error(
+        "Header PL tidak ditemukan."
+      );
 
-$("download").classList.remove("hidden");
+    }
 
-}catch(x){
-  $("msg").innerHTML=
-    '<div class="error">'+esc(x.message)+'</div>';
-}
+
+    if(bh<0){
+
+      throw Error(
+        "Header BARANG tidak ditemukan."
+      );
+
+    }
+
+
+    /* ===============================================
+       CEK HEADER BERTINGKAT PL
+       =============================================== */
+
+    let next=pr[ph+1]||[];
+
+    let hasSubWeight=
+      next.some(v=>
+        [
+          "GW",
+          "NW",
+          "GROSS WEIGHT",
+          "NET WEIGHT"
+        ].includes(txt(v))
+      );
+
+    let plHeaderRows=
+      hasSubWeight
+      ? [ph,ph+1]
+      : [ph];
+
+
+    /* ===============================================
+       TENTUKAN JENIS KODE PL
+       
+       PRIORITAS:
+       1. MATERIAL CODE
+       2. SKU
+       3. STYLE
+       
+       Jadi file 00160 yang mempunyai
+       MATERIAL CODE akan menggunakan
+       MATERIAL CODE.
+       =============================================== */
+
+    let codeType="";
+
+    if(
+      findCol(
+        pr,
+        plHeaderRows,
+        [
+          "MATERIAL CODE",
+          "MATERIAL\nCODE",
+          "MATERIALCODE"
+        ]
+      )>=0
+    ){
+
+      codeType="MATERIAL CODE";
+
+    }
+    else if(
+      findCol(
+        pr,
+        plHeaderRows,
+        ["SKU"]
+      )>=0
+    ){
+
+      codeType="SKU";
+
+    }
+    else if(
+      findCol(
+        pr,
+        plHeaderRows,
+        ["STYLE"]
+      )>=0
+    ){
+
+      codeType="STYLE";
+
+    }
+
+
+    /* ===============================================
+       CARI KOLOM KODE PL
+       =============================================== */
+
+    let pm=-1;
+
+    if(codeType==="MATERIAL CODE"){
+
+      pm=findCol(
+        pr,
+        plHeaderRows,
+        [
+          "MATERIAL CODE",
+          "MATERIAL\nCODE",
+          "MATERIALCODE"
+        ]
+      );
+
+    }
+    else if(codeType==="SKU"){
+
+      pm=findCol(
+        pr,
+        plHeaderRows,
+        ["SKU"]
+      );
+
+    }
+    else if(codeType==="STYLE"){
+
+      pm=findCol(
+        pr,
+        plHeaderRows,
+        ["STYLE"]
+      );
+
+    }
+
+
+    /* ===============================================
+       KOLOM PL LAIN
+       =============================================== */
+
+    let pi=findCol(
+      pr,
+      plHeaderRows,
+      [
+        "ITEM NAME",
+        "ITEM\nNAME",
+        "ITEMNAME"
+      ]
+    );
+
+
+    let pq=findCol(
+      pr,
+      plHeaderRows,
+      [
+        "QTY",
+        "TOTAL QTY",
+        "TOTAL QTY (PAIRS)",
+        "TOTAL QTY PAIRS",
+        "QUANTITY"
+      ]
+    );
+
+
+    let pn=findCol(
+      pr,
+      plHeaderRows,
+      [
+        "N/W",
+        "NW",
+        "NETTO",
+        "NET WEIGHT"
+      ]
+    );
+
+
+    let pg=findCol(
+      pr,
+      plHeaderRows,
+      [
+        "G/W",
+        "GW",
+        "BRUTO",
+        "GROSS WEIGHT"
+      ]
+    );
+
+
+    /* ===============================================
+       KOLOM BARANG
+       =============================================== */
+
+    let bk=findCol(
+      br,
+      [bh],
+      [
+        "KODE BARANG",
+        "KODEBARANG"
+      ]
+    );
+
+
+    let bi=findCol(
+      br,
+      [bh],
+      ["URAIAN"]
+    );
+
+
+    let bq=findCol(
+      br,
+      [bh],
+      [
+        "JUMLAH SATUAN",
+        "JUMLAHSATUAN",
+        "QTY"
+      ]
+    );
+
+
+    let bn=findCol(
+      br,
+      [bh],
+      ["NETTO"]
+    );
+
+
+    let bg=findCol(
+      br,
+      [bh],
+      ["BRUTO"]
+    );
+
+
+    /* ===============================================
+       CEK KOLOM YANG TIDAK DITEMUKAN
+       =============================================== */
+
+    let req={
+
+      "PL - MATERIAL CODE / SKU / STYLE":pm,
+
+      "PL - ITEM NAME":pi,
+
+      "PL - QTY / TOTAL QTY":pq,
+
+      "PL - NETTO / NW":pn,
+
+      "PL - BRUTO / GW":pg,
+
+      "BARANG - KODE BARANG":bk,
+
+      "BARANG - URAIAN":bi,
+
+      "BARANG - JUMLAH SATUAN":bq,
+
+      "BARANG - NETTO":bn,
+
+      "BARANG - BRUTO":bg
+
+    };
+
+
+    let miss=
+      Object.entries(req)
+      .filter(x=>x[1]<0)
+      .map(x=>x[0]);
+
+
+    if(miss.length){
+
+      throw Error(
+        "Kolom tidak ditemukan:\n" +
+        miss.join("\n")
+      );
+
+    }
+
+
+    /* ===============================================
+       AMBIL DATA
+       =============================================== */
+
+    let pDataStart=
+      ph+plHeaderRows.length;
+
+    let bDataStart=
+      bh+1;
+
+
+    let pdata=
+      extractData(
+        pr,
+        pDataStart,
+        pm
+      );
+
+
+    let bdata=
+      extractData(
+        br,
+        bDataStart,
+        bk
+      );
+
+
+    /* ===============================================
+       BANDINGKAN
+       
+       BERDASARKAN POSISI BARIS
+       =============================================== */
+
+    diffs=[];
+
+
+    let n=Math.max(
+      pdata.length,
+      bdata.length
+    );
+
+
+    for(let i=0;i<n;i++){
+
+      let x=pdata[i]||[];
+
+      let y=bdata[i]||[];
+
+
+      [
+        [
+          "MATERIAL CODE / SKU / STYLE ↔ KODE BARANG",
+          x[pm],
+          y[bk]
+        ],
+
+        [
+          "ITEM NAME ↔ URAIAN",
+          x[pi],
+          y[bi]
+        ],
+
+        [
+          "QTY / TOTAL QTY ↔ JUMLAH SATUAN",
+          x[pq],
+          y[bq]
+        ],
+
+        [
+          "NETTO / NW ↔ NETTO",
+          x[pn],
+          y[bn]
+        ],
+
+        [
+          "BRUTO / GW ↔ BRUTO",
+          x[pg],
+          y[bg]
+        ]
+
+      ].forEach(c=>{
+
+        if(!eq(c[1],c[2])){
+
+          diffs.push({
+
+            "BARIS DATA":i+1,
+
+            "FIELD":c[0],
+
+            "PL":c[1]??"",
+
+            "BARANG":c[2]??""
+
+          });
+
+        }
+
+      });
+
+    }
+
+
+    /* ===============================================
+       TAMPILKAN STATISTIK
+       =============================================== */
+
+    $("pc").textContent=
+      pdata.length;
+
+    $("bc").textContent=
+      bdata.length;
+
+    $("dc").textContent=
+      diffs.length;
+
+    $("result")
+      .classList
+      .remove("hidden");
+
+
+    /* ===============================================
+       JIKA SEMUA DATA SAMA
+       =============================================== */
+
+    if(!diffs.length){
+
+      $("content").innerHTML=
+
+        '<div class="match">' +
+
+        '✅ BOTH FILES MATCH' +
+
+        '<small>' +
+
+        'PL dan BARANG memiliki data yang sama.' +
+
+        '</small>' +
+
+        '</div>';
+
+      return;
+
+    }
+
+
+    /* ===============================================
+       JIKA ADA PERBEDAAN
+       =============================================== */
+
+    let h=
+
+      '<div class="mismatch">' +
+
+      '❌ DATA TIDAK SESUAI' +
+
+      '<small>' +
+
+      'Ditemukan ' +
+
+      diffs.length +
+
+      ' perbedaan antara file PL dan BARANG.' +
+
+      '</small>' +
+
+      '</div>' +
+
+
+      '<h2>Perbedaan Ditemukan</h2>' +
+
+
+      '<div class="table">' +
+
+      '<table>' +
+
+      '<thead>' +
+
+      '<tr>' +
+
+      '<th>Baris Data</th>' +
+
+      '<th>Field</th>' +
+
+      '<th>PL</th>' +
+
+      '<th>BARANG</th>' +
+
+      '</tr>' +
+
+      '</thead>' +
+
+      '<tbody>';
+
+
+    diffs.forEach(d=>{
+
+      h+=
+
+        '<tr>' +
+
+        '<td>' +
+        esc(d["BARIS DATA"]) +
+        '</td>' +
+
+        '<td>' +
+        esc(d.FIELD) +
+        '</td>' +
+
+        '<td>' +
+        esc(d.PL) +
+        '</td>' +
+
+        '<td>' +
+        esc(d.BARANG) +
+        '</td>' +
+
+        '</tr>';
+
+    });
+
+
+    h+=
+
+      '</tbody>' +
+
+      '</table>' +
+
+      '</div>';
+
+
+    $("content").innerHTML=h;
+
+
+    /* Tampilkan tombol download */
+
+    $("download")
+      .classList
+      .remove("hidden");
+
+
+  }
+  catch(x){
+
+    $("msg").innerHTML=
+
+      '<div class="error">' +
+
+      esc(x.message) +
+
+      '</div>';
+
+  }
 
 };
 
+
+/* =========================================================
+   DOWNLOAD HASIL PERBANDINGAN
+   ========================================================= */
+
 $("download").onclick=()=>{
-  let ws=XLSX.utils.json_to_sheet(diffs);
-  let wb=XLSX.utils.book_new();
+
+  let ws=
+    XLSX.utils.json_to_sheet(diffs);
+
+  let wb=
+    XLSX.utils.book_new();
+
 
   XLSX.utils.book_append_sheet(
     wb,
@@ -354,10 +1094,12 @@ $("download").onclick=()=>{
     "PERBEDAAN"
   );
 
+
   XLSX.writeFile(
     wb,
     "hasil_perbandingan_PL_vs_BARANG.xlsx"
   );
+
 };
 </script>
 </body>
